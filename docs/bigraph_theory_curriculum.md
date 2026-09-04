@@ -96,7 +96,7 @@ This explains *why* composition is well-behaved — the guarantee that composing
 ### References
 - **Bartosz Milewski, *Category Theory for Programmers* — video lecture series (YouTube).**
   The best free, CS/programming-oriented (not pure-math-oriented) route in. Built from a programmer's intuition outward, not from set-theoretic foundations inward.
-  Playlist: https://www.youtube.com/playlist?list=PLbgaMIhjbmEnaH_LTkxLI7FMa2HsnawM_
+  Playlist: https://youtube.com/playlist?list=PLbgaMIhjbmEnaH_LTkxLI7FMa2HsnawM_&si=b74qub4aspTScLN0
 - **Companion free book/PDF** (transcribed from the same lectures, same author, CC-BY-SA licensed):
   https://github.com/hmemcpy/milewski-ctfp-pdf
 - Focus specifically on: categories, functors, **monoidal categories**, and composition — you can treat topics like Kleisli categories, monads, and advanced functional-programming applications as optional/skippable for your purposes; they're aimed at Haskell/functional programmers and not essential for reading the bigraphs literature.
