@@ -1,143 +1,126 @@
-##### SPEC ###
 '''
-
-
-
+This is the skin extracellular matrix aging simulation
 '''
-
-
 
 # import the bigraph libs
 #from process_bigraph import allocate_core, Composite, process
 from process_bigraph import allocate_core
-from process_bigraph.composite import Process, Step, Composite, as_process, as_step
+from process_bigraph.composite import Process, Composite
 from process_bigraph.emitter import emitter_from_wires
 
-# GENERATION_TIME = time between divisions of an individual cell.
-# every generation_time, the cells double (Mitosis)
+# Simulation time and damage rates use seconds.
 SECOND = 1
 MINUTE = 60 * SECOND
 HOUR = 60 * MINUTE
-GENERATION_TIME = 20 * MINUTE
+ONE_YEAR = 365 * 24 * HOUR
 
 # explicit registration of all processes and steps in the package
 def build_core():
     our_core = allocate_core()
-    our_core.register_link("ErrorAccumulation", ErrorAccumulation)
-    our_core.register_link("GoodDNA", GoodDNA)
+    our_core.register_link("GlycogenDamage", GlycogenDamage)
     return our_core
 
-# Error accumulation in DNA reproduction
-class ErrorAccumulation(Process):
-    # Schema = a data model as a dictionary
-    # when the process is instantiated, an actual configuration dictionary is supplied:
-    # The base Process/Edge initialization validates/fills that dictionary using config_schema and
-    # stores the resulting configuration on the instance as: self.config
+# Collagen damage from UV exposure, glycation, and MMP activity.
+class GlycogenDamage(Process):
     config_schema = {
-        "accumulation_rate": {
+        "UV_impact": {
             "_type": "float",
-            "_default": 3.0 / 1_000_000_000, # error rate per million
+            "_default": 3.0 / 1_000_000_000, # % of fragmented collagen per second per UV unit (1 UV unit = average UV in california)
         },
+        "glycation_impact": {
+            "_type": "float",
+            "_default": 3.0 / 1_000_000_000, # % of cross linked collagen per second per glucose unit (1 glucose unit = average glucose in california)
+        },
+        "MMP_impact": {
+            "_type": "float",
+            "_default": 3.0 / 1_000_000_000, }, # % of fragmented collagen per second per MMP unit
     }
     # config already passed during creation
-    # this si executed after config is set
+    # this is executed after config is set
     def initialize(self, config=None):
         print("Process config:", self.config)
-        if self.config["accumulation_rate"] < 0 or self.config["accumulation_rate"] > 1:
-            raise ValueError("Error Accumulation requires rate between 0 and 1")
+        if self.config["UV_impact"] <= 0 or self.config["glycation_impact"] <=0 or self.config["MMP_impact"] <= 0:
+            raise ValueError("UV, Glycation and MMP impacts must be over 0")
 
     # inputs as a dictionary
     def inputs(self):
-        # defective dna proportion in percent
-        return {"defective_dna": "float", "number_of_cells": "integer"}
+        # Collagen stores are fractions (0 to 1); doses are relative levels.
+        return {"IntactCollagen": "float",
+                "UV_dose": "float", "glucose_dose": "float", "MMP1": "float"}
 
     # output as a dictionary
     def outputs(self):
-        return {"defective_dna": "float","number_of_cells": "integer"}
+        return {"IntactCollagen": "float","FragmentedCollagen": "float", "CrosslinkedCollagen": "float"}
 
     # this is where the process happens
     def update(self, state, interval):
         # config parameters
-        accumulation_rate = float(self.config["accumulation_rate"])
+        UV_impact = float(self.config["UV_impact"])
+        glycation_impact = float(self.config["glycation_impact"])
+        MMP_impact = float(self.config["MMP_impact"])
         # stores - inputs/outputs
-        defective_dna = float(state["defective_dna"])
-        number_of_cells = int(state["number_of_cells"])
+        IntactCollagen = float(state["IntactCollagen"])
+        UV_dose = float(state["UV_dose"])
+        glucose_dose = float(state["glucose_dose"])
+        MMP1 = float(state["MMP1"])
+        #FragmentedCollagen = float(state["FragmentedCollagen"])
+        #CrosslinkedCollagen = float(state["CrosslinkedCollagen"])
 
-        # accumulation rate every generation
-        good_dna = (1-defective_dna)
-        new_good_dna = good_dna * (1-accumulation_rate)
-        new_defective_dna = 1-new_good_dna
-        delta = new_defective_dna - defective_dna
+        new_FragmentedCollagen_delta = IntactCollagen * (UV_impact * UV_dose + MMP_impact * MMP1) * interval
+        new_CrosslinkedCollagen_delta = IntactCollagen * glycation_impact * glucose_dose * interval
 
-        # double number of cell every generation
-        new_cells =  number_of_cells
+        new_intactCollagen_delta = -(new_FragmentedCollagen_delta + new_CrosslinkedCollagen_delta)
 
-        return {"defective_dna": delta, "number_of_cells": new_cells}
-
-# Step to give the good DNA
-class GoodDNA(Step):
-    def inputs(self):
-        return {
-            "defective_DNA": "float"
-        }
-
-    def outputs(self):
-        return {
-            "good_DNA": "overwrite[float]"
-        }
-
-    def update(self, state, interval=None):
-        count = state["defective_DNA"]
-
-        return {
-            "good_DNA": 1-count
-        }
+        return {"IntactCollagen": new_intactCollagen_delta, "FragmentedCollagen": new_FragmentedCollagen_delta, "CrosslinkedCollagen": new_CrosslinkedCollagen_delta}
 
 # execution
 exec_core = build_core()
 
 sim = Composite(
-    {
-        "state": {
+        {
+        "state" : {
+            "IntactCollagen_top": 1.0,
+            "FragmentedCollagen_top": 0.0,
+            "CrosslinkedCollagen_top": 0.0,
+
+            "HealthyFibroblasts": 100,
+            "SenescentFibroblasts": 0,
+
+            "MMP1_top": 0.0,
+            "IGF1_top": 1.0,
+
             # shared model state
             "t": 0.0,
-            "Defective DNA Top": 0.0,
-            "cell_population": 1,
-            "Good DNA Top": 0.0,
+            "UV_dose_top": 1.0,
+            "glucose_dose_top": 1.0,
 
-            # our function for error accumulation
-            "error": {
+            # our function  for Glycation and UV & Oxidation as input
+            "damage": {
                 "_type": "process",
-                "address": "local:ErrorAccumulation", # local:<the name used in the register_link>
+                "address": "local:GlycogenDamage", # local:<the name used in the register_link>
                 "config": {
-                    "accumulation_rate": 1.0/1_000_000_000,
+                    "UV_impact": 1.0/1_000_000_000,
+                    "glycation_impact": 1.0 / 1_000_000_000,
+                    "MMP_impact": 1.0 / 1_000_000_000,
                 },
-                "interval": GENERATION_TIME, # defines the process update interval
-                "inputs": {"defective_dna":["Defective DNA Top"],
-                           "number_of_cells":["cell_population"]},
-                "outputs": {"defective_dna":["Defective DNA Top"],
-                            "number_of_cells": ["cell_population"]},
-            },
-
-            # Step: to give the good DNA ratio
-            "good_DNA_step": {
-                "_type": "step",
-                "address": "local:GoodDNA",
-                "inputs": {
-                    "defective_DNA": ["Defective DNA Top"]
-                },
-                "outputs": {
-                    "good_DNA": ["Good DNA Top"]
-                }
+                "interval": ONE_YEAR, # defines the process update interval
+                "inputs": {"IntactCollagen":["IntactCollagen_top"],
+                           "UV_dose":["UV_dose_top"]
+                           , "glucose_dose":["glucose_dose_top"],
+                           "MMP1":["MMP1_top"]},
+                "outputs": {"IntactCollagen":["IntactCollagen_top"],
+                            "FragmentedCollagen":["FragmentedCollagen_top"],
+                            "CrosslinkedCollagen":["CrosslinkedCollagen_top"],
+                            },
             },
 
             # Emitter: record selected wires at each simulation tick
             "emitter": emitter_from_wires(
                 {
                     "time": ["global_time"],
-                    "error": ["Defective DNA Top"],
-                    "good_DNA": ["Good DNA Top"],
-                    "number_of_cells": ["cell_population"],
+                    "IntactCollagen": ["IntactCollagen_top"],
+                    "FragmentedCollagen": ["FragmentedCollagen_top"],
+                    "CrosslinkedCollagen": ["CrosslinkedCollagen_top"],
                 }
             )
         }
@@ -146,45 +129,51 @@ sim = Composite(
 )
 
 # inspect ports with interface
-error_process = ErrorAccumulation({"accumulation_rate": 1.0e-9},  core=exec_core)
-ErrorAccumulation_interface = error_process.interface()
+glycogen_process = GlycogenDamage(
+    {
+        "UV_impact": 1.0 / 1_000_000_000,
+        "glycation_impact": 1.0 / 1_000_000_000,
+        "MMP_impact": 1.0 / 1_000_000_000,
+    },  core=exec_core)
+glycogen_process_interface = glycogen_process.interface()
 print("Process inputs schema:")
-print(exec_core.render(ErrorAccumulation_interface["inputs"]))
+print(exec_core.render(glycogen_process_interface["inputs"]))
 
 print("\nProcess outputs schema:")
-print(exec_core.render(ErrorAccumulation_interface["outputs"]))
+print(exec_core.render(glycogen_process_interface["outputs"]))
 
-# Run the composite for 10.0 units of composite time
-sim.run(50.0 * GENERATION_TIME)
+# Run the composite for x units of composite time
+sim.run(50.0 * ONE_YEAR)
 
 # Inspect results
 records = sim.state["emitter"]["instance"].query()
-final_DNA = sim.state["Defective DNA Top"]
-final_GoodDNA = sim.state["Good DNA Top"]
-final_cell_population = sim.state["cell_population"]
+final_IntactCollagen = sim.state["IntactCollagen_top"]
+final_FragmentedCollagen = sim.state["FragmentedCollagen_top"]
+final_CrosslinkedCollagen = sim.state["CrosslinkedCollagen_top"]
+
 print("n records:", len(records))
 print("first record:", records[0])
 print("last record:", records[-1])
 
-print("Final Defective DNA Top:", final_DNA)
-print("Final Good DNA Top:", final_GoodDNA)
-print("Final number of cells:", final_cell_population)
+print("Final intact collagen:", final_IntactCollagen)
+print("Final fragmented collagen:", final_FragmentedCollagen)
+print("Final crosslinked collagen:", final_CrosslinkedCollagen)
 print("✅ Composite simulation ran")
 
 # Visualize
 import matplotlib.pyplot as plt
 
 # Convert emitter records (list of dicts) into time series
-times = [r["time"] for r in records]
-error_vals = [r["error"] for r in records]
+times = [r["time"] / ONE_YEAR for r in records]
+Intact_collagen_vals = [r["IntactCollagen"] for r in records]
 
 plt.figure(figsize=(8, 4))
 
-plt.plot(times, error_vals, label="DNA Error rate (state)", linewidth=2)
+plt.plot(times, Intact_collagen_vals, label="Intact collagen (state)", linewidth=2)
 
-plt.xlabel("time")
-plt.ylabel("value")
-plt.title("DNA Error accumulation")
+plt.xlabel("Time (years)")
+plt.ylabel("Collagen fraction")
+plt.title("Intact Collagen")
 plt.legend()
 plt.tight_layout()
 plt.show()

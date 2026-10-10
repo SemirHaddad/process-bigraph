@@ -48,19 +48,42 @@ inflammation / senescence / stem-cell dysfunction
 
 ## Simulatiom Model
 
-Maybe two processes
+Maybe three processes
 ```
 Composite:
-    matrix stiffness + architecture integrity 
+matrix stiffness + architecture integrity 
+        IntactCollagen %
+        FragmentedCollagen %
+        CrosslinkedCollagen %
+
+state = {
+    "IntactCollagen": 1.0,
+    "FragmentedCollagen": 0.0
+    "CrosslinkedCollagen": 0.0
+    
+    "HealthyFibroblasts": 100,
+    "SenescentFibroblasts": 0,
+
+    "MMP1": 0.0,
+    "IGF1": 1.0,
+}
+
+    
 Process 1:
 collagen with Glycation and UV & Oxidation as input
 ⇒ stiffness and architecture integrity
 
+
 Process 2:
 fibroblast activity
 - sensible to stiffness and architecture integrity
+    FibroblastMechanicalTension (value between 0 and 1)
 ⇒ collagen synthesis and destruction
+    CollagenSynthesisRate
+    MMPActivity
 
-Step:inflammation / senescence / stem-cell dysfunction
-- direct function of stiffness and architecture integrity
+Process 3: 
+fibroblast scenescence
+    -> IGF1 decrease
+    -> MMP Increase
 ```
