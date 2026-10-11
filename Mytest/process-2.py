@@ -17,11 +17,15 @@ ONE_YEAR = 365 * 24 * HOUR
 # explicit registration of all processes and steps in the package
 def build_core():
     our_core = allocate_core()
-    our_core.register_link("GlycogenDamage", GlycogenDamage)
+    our_core.register_link("GlycogenDamage", CollagenDamage)
+    our_core.register_link("FibroblastActivity", FibroblastActivity)
     return our_core
 
-# Collagen damage from UV exposure, glycation, and MMP activity.
-class GlycogenDamage(Process):
+'''
+Collagen damage from UV exposure, glycation, and MMP activity.
+The UV and MMP break the collagen fibrils (fragment) while the glycation create non enzymatic cross-linking
+'''
+class CollagenDamage(Process):
     config_schema = {
         "UV_impact": {
             "_type": "float",
@@ -63,8 +67,6 @@ class GlycogenDamage(Process):
         UV_dose = float(state["UV_dose"])
         glucose_dose = float(state["glucose_dose"])
         MMP1 = float(state["MMP1"])
-        #FragmentedCollagen = float(state["FragmentedCollagen"])
-        #CrosslinkedCollagen = float(state["CrosslinkedCollagen"])
 
         new_FragmentedCollagen_delta = IntactCollagen * (UV_impact * UV_dose + MMP_impact * MMP1) * interval
         new_CrosslinkedCollagen_delta = IntactCollagen * glycation_impact * glucose_dose * interval
@@ -72,6 +74,99 @@ class GlycogenDamage(Process):
         new_intactCollagen_delta = -(new_FragmentedCollagen_delta + new_CrosslinkedCollagen_delta)
 
         return {"IntactCollagen": new_intactCollagen_delta, "FragmentedCollagen": new_FragmentedCollagen_delta, "CrosslinkedCollagen": new_CrosslinkedCollagen_delta}
+
+'''
+    Fibroblast activity related to collagen 
+    The fibroblasts regenerate the collagen: they reduce fragmented collagen and crosslinked collagen
+    When the mechanical tension is low however they regenerate less and also increase MMP creation
+'''
+class FibroblastActivity(Process):
+    config_schema = {
+        "regeneration_rate": {
+            "_type": "float",
+            "_default": 1.0 / ONE_YEAR, # % of fragmented collagen and crosslinked collagen regenerated
+        },
+        "mechanical_tension_regeneration_impact": {
+            "_type": "float",
+            "_default": 1.0, # % of regeneration decrease per point of mechanical tension
+             },
+        "mechanical_tension_MMP1_impact": {
+            "_type": "float",
+            "_default": 3.0 / 1_000_000_000, # MMP1 increase per unit of tension loss per year
+        },
+        "MMP1_MAX": {
+            "_type": "float",
+            "_default": 1.0,  # MAX MMP1 - this is an abstract value (no unit)
+        },
+        "MAX_REGENERATION": {
+            "_type": "float",
+            "_default": 0.1,  # Maximum total collagen fraction repaired per year (0.1 = 10%).
+        },
+
+    }
+
+     # config already passed during creation
+    # this is executed after config is set
+    def initialize(self, config=None):
+        print("Process config:", self.config)
+        if self.config["regeneration_rate"] <= 0 or self.config["mechanical_tension_regeneration_impact"] <=0 or self.config["mechanical_tension_MMP1_impact"] <= 0:
+            raise ValueError("impacts rates must be over 0")
+
+    # inputs as a dictionary
+    def inputs(self):
+        # Collagen stores are fractions (0 to 1); doses are relative levels.
+        return {"IntactCollagen": "float", "FragmentedCollagen": "float", "CrosslinkedCollagen": "float"}
+
+    # output as a dictionary
+    def outputs(self):
+        return {"IntactCollagen": "float","FragmentedCollagen": "float", "CrosslinkedCollagen": "float", "MMP1": "float"}
+
+    # this is where the process happens
+    def update(self, state, interval):
+        # config parameters
+        regeneration_rate = float(self.config["regeneration_rate"])
+        mechanical_tension_regeneration_impact = float(self.config["mechanical_tension_regeneration_impact"])
+        mechanical_tension_MMP1_impact = float(self.config["mechanical_tension_MMP1_impact"])
+        mmp1_max = float(self.config["MMP1_MAX"])
+        max_regen = float(self.config["MAX_REGENERATION"])
+
+        # stores - inputs/outputs
+        FragmentedCollagen = float(state["FragmentedCollagen"])
+        CrosslinkedCollagen = float(state["CrosslinkedCollagen"])
+
+        Mechanical_tension = FragmentedCollagen + CrosslinkedCollagen
+        #print("Mechanical tension:", Mechanical_tension)
+        total_regeneration_rate = regeneration_rate * (1- (mechanical_tension_regeneration_impact * Mechanical_tension))
+        #print("total_regeneration_rate:", total_regeneration_rate)
+
+
+        # Share one repair capacity across both damaged collagen pools.
+        total_damage = FragmentedCollagen + CrosslinkedCollagen
+        repair_fraction = max(0.0, min(1.0, total_regeneration_rate * interval))
+        repair_capacity = max_regen * interval / ONE_YEAR
+        total_repair = min(total_damage * repair_fraction, repair_capacity)
+
+        if total_damage > 0:
+            new_FragmentedCollagen_delta = -total_repair * FragmentedCollagen / total_damage
+            new_CrosslinkedCollagen_delta = -total_repair * CrosslinkedCollagen / total_damage
+        else:
+            new_FragmentedCollagen_delta = 0.0
+            new_CrosslinkedCollagen_delta = 0.0
+
+        #print("FragmentedCollagen:", FragmentedCollagen)
+        #print("new_FragmentedCollagen_delta:", new_FragmentedCollagen_delta)
+        new_MMP1_delta = (
+            mechanical_tension_MMP1_impact * Mechanical_tension * mmp1_max
+            * interval / ONE_YEAR
+        )
+
+        new_intactCollagen_delta = -(new_FragmentedCollagen_delta + new_CrosslinkedCollagen_delta)
+
+        return {"IntactCollagen": new_intactCollagen_delta,
+                "FragmentedCollagen": new_FragmentedCollagen_delta,
+                "CrosslinkedCollagen": new_CrosslinkedCollagen_delta,
+                "MMP1": new_MMP1_delta}
+
 
 # execution
 exec_core = build_core()
@@ -87,7 +182,6 @@ sim = Composite(
             "SenescentFibroblasts": 0,
 
             "MMP1_top": 0.0,
-            "IGF1_top": 1.0,
 
             # shared model state
             "t": 0.0,
@@ -100,10 +194,10 @@ sim = Composite(
                 "address": "local:GlycogenDamage", # local:<the name used in the register_link>
                 "config": {
                     "UV_impact": 1.0/1_000_000_000,
-                    "glycation_impact": 1.0 / 1_000_000_000,
+                    "glycation_impact": 1.2 / 1_000_000_000,
                     "MMP_impact": 1.0 / 1_000_000_000,
                 },
-                "interval": ONE_YEAR, # defines the process update interval
+                "interval": ONE_YEAR / 12, # defines the process update interval
                 "inputs": {"IntactCollagen":["IntactCollagen_top"],
                            "UV_dose":["UV_dose_top"]
                            , "glucose_dose":["glucose_dose_top"],
@@ -114,6 +208,25 @@ sim = Composite(
                             },
             },
 
+            "repair":{
+              "_type" : "process",
+                "address": "local:FibroblastActivity",
+                "config": {
+                    "regeneration_rate" : 1.0 / ONE_YEAR,
+                    "mechanical_tension_regeneration_impact" : 1.0,
+                    "mechanical_tension_MMP1_impact" : 0.5,
+                    "MMP1_MAX" : 1.0,
+                    "MAX_REGENERATION" : 0.10
+                },
+                "interval": ONE_YEAR / 12,
+                "inputs": {"IntactCollagen":["IntactCollagen_top"],
+                           "FragmentedCollagen":["FragmentedCollagen_top"],
+                           "CrosslinkedCollagen":["CrosslinkedCollagen_top"],},
+                "outputs": {"IntactCollagen":["IntactCollagen_top"],
+                            "FragmentedCollagen":["FragmentedCollagen_top"],
+                            "CrosslinkedCollagen":["CrosslinkedCollagen_top"],
+                            "MMP1":["MMP1_top"]},
+            },
             # Emitter: record selected wires at each simulation tick
             "emitter": emitter_from_wires(
                 {
@@ -129,7 +242,7 @@ sim = Composite(
 )
 
 # inspect ports with interface
-glycogen_process = GlycogenDamage(
+glycogen_process = CollagenDamage(
     {
         "UV_impact": 1.0 / 1_000_000_000,
         "glycation_impact": 1.0 / 1_000_000_000,
@@ -143,7 +256,7 @@ print("\nProcess outputs schema:")
 print(exec_core.render(glycogen_process_interface["outputs"]))
 
 # Run the composite for x units of composite time
-sim.run(50.0 * ONE_YEAR)
+sim.run(70.0 * ONE_YEAR)
 
 # Inspect results
 records = sim.state["emitter"]["instance"].query()
@@ -166,10 +279,14 @@ import matplotlib.pyplot as plt
 # Convert emitter records (list of dicts) into time series
 times = [r["time"] / ONE_YEAR for r in records]
 Intact_collagen_vals = [r["IntactCollagen"] for r in records]
+fragmented_collagen_vals = [r["FragmentedCollagen"] for r in records]
+crosslinked_collagen_vals = [r["CrosslinkedCollagen"] for r in records]
 
 plt.figure(figsize=(8, 4))
 
 plt.plot(times, Intact_collagen_vals, label="Intact collagen (state)", linewidth=2)
+plt.plot(times, fragmented_collagen_vals, label="Fragmented collagen (state)", linewidth=2)
+plt.plot(times, crosslinked_collagen_vals, label="Crosslinked collagen (state)", linewidth=2)
 
 plt.xlabel("Time (years)")
 plt.ylabel("Collagen fraction")

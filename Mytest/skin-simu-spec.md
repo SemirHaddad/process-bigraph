@@ -4,11 +4,14 @@
 The goal is to simulate skin aging from the extracellular matrix point of view.
 We are simulating the effect of aging on the Dermis, and its extracellular matrix.
 
-The thesis for this simulation is that we are going to ignore cellular senescence, and see what extracellular aging alon can do
+The thesis for this simulation is that we are going to ignore cellular senescence, and see what extracellular aging alone can do
 
 ## Theory
 Skins is made of three layers:
 - epidermis - the upper layer with epidermis stem cells that continuously rejunevate the skin interface with the world, made of dead cells
+ epidermial stem cells create basal keratinocytes that mature into granular kreatinocytes and then become corneocytes, and then desquamating corneocytes
+ as they migrate to the surfcae of the skin. Corneocytes aredead cells filled with keratin (a protein) that constitues the upper protective
+    layer of the epidermis (the one exposed to the elements)
 - dermis the intermediate layer made of connective tissues that act as a support for the epidermis. The dermis has two layers
   - The Papillary dermis: The thin, upper layer made of loose connective tissue that interlocks with the epidermis through finger-like projections (dermal papillae). 
   It houses tiny blood vessels and touch receptors.  
@@ -26,6 +29,10 @@ We take into account only glycation and UV & oxidation:
 | Sugar + time	 | Glycation → AGEs	  |pathological cross-linking|
 | UV / ROS	     | ROS → AP-1 → MMPs	 |collagen fragmentation + reduced synthesis|
 
+Impact of the collagen matric to the fibroblast:
+• Loss of Mechanical Tension: Healthy fibroblasts must stretch and anchor themselves tightly to a firm, intact collagen matrix to stay active. When collagen is broken down (by aging, UV light, or pollution), fibroblasts lose these structural anchor points and collapse.
+• Decreased Collagen Production: Once a fibroblast collapses due to a lack of tension, its internal machinery downregulates. It stops producing new Type I and Type III collagen, accelerating the thinning of the dermis.
+• Increased Collagen Destruction: In this inactive, collapsed state, fibroblasts actually increase their production of matrix metalloproteinases (MMPs). These are enzymes that actively chew up and destroy the remaining healthy collagen around them.
 
 ## Model
 The model is:
@@ -43,8 +50,6 @@ fibroblast mechanosensing changes
 ↑ MMP activity  
 ↓  
 more ECM deterioration  
-↓  
-inflammation / senescence / stem-cell dysfunction  
 
 ## Simulatiom Model
 
@@ -82,7 +87,7 @@ fibroblast activity
     CollagenSynthesisRate
     MMPActivity
 
-Process 3: 
+Process 3: (not implemented)
 fibroblast scenescence
     -> IGF1 decrease
     -> MMP Increase
