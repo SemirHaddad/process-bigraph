@@ -89,6 +89,7 @@ fibroblast activity
 
 Process 3: (not implemented)
 fibroblast scenescence
+    This process is simply an accumulation of senescent cell modeled as a 
     -> IGF1 decrease
     -> MMP Increase
 ```

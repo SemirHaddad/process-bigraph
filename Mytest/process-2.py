@@ -5,7 +5,7 @@ This is the skin extracellular matrix aging simulation
 # import the bigraph libs
 #from process_bigraph import allocate_core, Composite, process
 from process_bigraph import allocate_core
-from process_bigraph.composite import Process, Composite
+from process_bigraph.composite import Process, Composite, Step
 from process_bigraph.emitter import emitter_from_wires
 
 # Simulation time and damage rates use seconds.
@@ -19,6 +19,8 @@ def build_core():
     our_core = allocate_core()
     our_core.register_link("GlycogenDamage", CollagenDamage)
     our_core.register_link("FibroblastActivity", FibroblastActivity)
+    our_core.register_link("SenescentFibroblastAccumulation", SenescentFibroblastAccumulation)
+    our_core.register_link("HealthyFibroblast", HealthyFibroblast)
     return our_core
 
 '''
@@ -115,7 +117,8 @@ class FibroblastActivity(Process):
     # inputs as a dictionary
     def inputs(self):
         # Collagen stores are fractions (0 to 1); doses are relative levels.
-        return {"IntactCollagen": "float", "FragmentedCollagen": "float", "CrosslinkedCollagen": "float"}
+        return {"IntactCollagen": "float", "FragmentedCollagen": "float", "CrosslinkedCollagen": "float",
+                "healthy_fibroblasts": "float"}
 
     # output as a dictionary
     def outputs(self):
@@ -133,10 +136,12 @@ class FibroblastActivity(Process):
         # stores - inputs/outputs
         FragmentedCollagen = float(state["FragmentedCollagen"])
         CrosslinkedCollagen = float(state["CrosslinkedCollagen"])
+        healthy_fibroblasts = float(state["healthy_fibroblasts"])
 
         Mechanical_tension = FragmentedCollagen + CrosslinkedCollagen
         #print("Mechanical tension:", Mechanical_tension)
-        total_regeneration_rate = regeneration_rate * (1- (mechanical_tension_regeneration_impact * Mechanical_tension))
+        total_regeneration_rate = regeneration_rate * (1- (mechanical_tension_regeneration_impact * Mechanical_tension)) \
+                                  * healthy_fibroblasts
         #print("total_regeneration_rate:", total_regeneration_rate)
 
 
@@ -167,6 +172,68 @@ class FibroblastActivity(Process):
                 "CrosslinkedCollagen": new_CrosslinkedCollagen_delta,
                 "MMP1": new_MMP1_delta}
 
+'''
+    Fibroblast become senescent and are less effective. 
+    This is independent from the collagen matrix aging.
+'''
+class SenescentFibroblastAccumulation(Process):
+
+    config_schema = {
+        "accumulation_rate": {
+            "_type": "float",
+            "_default": 3.0 / 1_000_000_000, # error rate per million
+        },
+    }
+    # config already passed during creation
+    # this si executed after config is set
+    def initialize(self, config=None):
+        print("Process config:", self.config)
+        if self.config["accumulation_rate"] < 0 or self.config["accumulation_rate"] > 1:
+            raise ValueError("Error Accumulation requires rate between 0 and 1")
+
+    # inputs as a dictionary
+    def inputs(self):
+        # defective dna proportion in percent
+        return {"senescent_fibroblasts": "float"}
+
+    # output as a dictionary
+    def outputs(self):
+        return {"senescent_fibroblasts": "float"}
+
+    # this is where the process happens
+    def update(self, state, interval):
+        # config parameters
+        accumulation_rate = float(self.config["accumulation_rate"])
+        # stores - inputs/outputs
+        senescent_fibroblasts = float(state["senescent_fibroblasts"])
+
+        # accumulation rate every generation
+        good_fibroblasts = (1-senescent_fibroblasts)
+        new_good_fibroblasts = good_fibroblasts * (1-accumulation_rate)
+        new_senescent_fibroblasts = 1-new_good_fibroblasts
+        delta = new_good_fibroblasts - new_senescent_fibroblasts
+
+        return {"senescent_fibroblasts": delta}
+
+# Step to give the healthy fibroblast ratio
+class HealthyFibroblast(Step):
+    def inputs(self):
+        return {
+            "senescent_fibroblasts": "float"
+        }
+
+    def outputs(self):
+        return {
+            "healthy_fibroblasts": "overwrite[float]"
+        }
+
+    def update(self, state, interval=None):
+        count = state["senescent_fibroblasts"]
+
+        return {
+            "healthy_fibroblasts": 1-count
+        }
+
 
 # execution
 exec_core = build_core()
@@ -178,8 +245,8 @@ sim = Composite(
             "FragmentedCollagen_top": 0.0,
             "CrosslinkedCollagen_top": 0.0,
 
-            "HealthyFibroblasts": 100,
-            "SenescentFibroblasts": 0,
+            "healthy_fibroblasts_top": 1,
+            "senescent_fibroblasts_top": 0,
 
             "MMP1_top": 0.0,
 
@@ -221,12 +288,37 @@ sim = Composite(
                 "interval": ONE_YEAR / 12,
                 "inputs": {"IntactCollagen":["IntactCollagen_top"],
                            "FragmentedCollagen":["FragmentedCollagen_top"],
-                           "CrosslinkedCollagen":["CrosslinkedCollagen_top"],},
+                           "CrosslinkedCollagen":["CrosslinkedCollagen_top"],
+                           "healthy_fibroblasts": ["healthy_fibroblasts_top"],},
                 "outputs": {"IntactCollagen":["IntactCollagen_top"],
                             "FragmentedCollagen":["FragmentedCollagen_top"],
                             "CrosslinkedCollagen":["CrosslinkedCollagen_top"],
                             "MMP1":["MMP1_top"]},
             },
+
+            "senescence": {
+                "_type": "process",
+                "address": "local:SenescentFibroblastAccumulation",
+                "config": {
+                    "accumulation_rate": 0.005 /12,
+                },
+                "interval": ONE_YEAR / 12,
+                "inputs": {"senescent_fibroblasts":["senescent_fibroblasts_top"],},
+                "outputs": {"senescent_fibroblasts":["senescent_fibroblasts_top"],},
+            },
+
+            # Step: to give the healthy fibroblast ratio
+            "healthy_fibroblast_step": {
+                "_type": "step",
+                "address": "local:HealthyFibroblast",
+                "inputs": {
+                    "senescent_fibroblasts":["senescent_fibroblasts_top"],
+                },
+                "outputs": {
+                    "healthy_fibroblasts": ["healthy_fibroblasts_top"]
+                }
+            },
+
             # Emitter: record selected wires at each simulation tick
             "emitter": emitter_from_wires(
                 {
@@ -234,6 +326,8 @@ sim = Composite(
                     "IntactCollagen": ["IntactCollagen_top"],
                     "FragmentedCollagen": ["FragmentedCollagen_top"],
                     "CrosslinkedCollagen": ["CrosslinkedCollagen_top"],
+                    "senescent_fibroblasts": ["senescent_fibroblasts_top"],
+                    "healthy_fibroblasts": ["healthy_fibroblasts_top"],
                 }
             )
         }
@@ -263,6 +357,8 @@ records = sim.state["emitter"]["instance"].query()
 final_IntactCollagen = sim.state["IntactCollagen_top"]
 final_FragmentedCollagen = sim.state["FragmentedCollagen_top"]
 final_CrosslinkedCollagen = sim.state["CrosslinkedCollagen_top"]
+final_HealthyFibroblasts = sim.state["healthy_fibroblasts_top"]
+final_SenescentFibroblasts = sim.state["senescent_fibroblasts_top"]
 
 print("n records:", len(records))
 print("first record:", records[0])
@@ -271,6 +367,8 @@ print("last record:", records[-1])
 print("Final intact collagen:", final_IntactCollagen)
 print("Final fragmented collagen:", final_FragmentedCollagen)
 print("Final crosslinked collagen:", final_CrosslinkedCollagen)
+print("Final healthy fibroblasts:", final_HealthyFibroblasts)
+print("Final senescent fibroblasts:", final_SenescentFibroblasts)
 print("✅ Composite simulation ran")
 
 # Visualize
