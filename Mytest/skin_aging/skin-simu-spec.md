@@ -34,6 +34,8 @@ Impact of the collagen matric to the fibroblast:
 • Decreased Collagen Production: Once a fibroblast collapses due to a lack of tension, its internal machinery downregulates. It stops producing new Type I and Type III collagen, accelerating the thinning of the dermis.
 • Increased Collagen Destruction: In this inactive, collapsed state, fibroblasts actually increase their production of matrix metalloproteinases (MMPs). These are enzymes that actively chew up and destroy the remaining healthy collagen around them.
 
+In addition, we model fibroblast senescence as a decrease in the number of active fibroblasts, as well as epigenetic aging as a reduced efficiency of active fibroblasts (loss of proteostasis)
+
 ## Model
 The model is:
 
@@ -45,6 +47,8 @@ oxidation / UV → AP-1 signaling → MMP Production → collagen cut in fragmen
 matrix stiffness + architecture change  
 ↓  
 fibroblast mechanosensing changes  
++ fibroblast senescence
++ fibroblast decreased efficiency du to epigentic aging
 ↓  
 ↓ collagen synthesis  
 ↑ MMP activity  
@@ -87,9 +91,14 @@ fibroblast activity
     CollagenSynthesisRate
     MMPActivity
 
-Process 3: (not implemented)
+Process 3: 
 fibroblast scenescence
     This process is simply an accumulation of senescent cell modeled as a 
     -> IGF1 decrease
     -> MMP Increase
+    
+Process 4:
+epigenetic aging
+    This process is the accumulation of epigentic errors (methlation and de-methylation) that reduces the protein generation
+    -> fibroblast efficiency decreased
 ```
